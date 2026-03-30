@@ -7,350 +7,335 @@ import ReactFlow, {
   useNodesState,
   useEdgesState,
   Panel,
-  getBezierPath,
-  EdgeLabelRenderer,
-  BaseEdge,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import clsx from "clsx";
+import { v4 as uuid } from "uuid";
 import { generateFlow } from "../services/ai";
-import Loader from "../components/Loader";
-import { getLayoutedElements } from "../utils/flowUtils.js";
-
-// ─── SHAPES ──────────────────────────────────────────────
-const shapeStyles = {
-  rectangle: "rounded-md",
-  rounded: "rounded-2xl",
-  diamond: "rotate-45 rounded-sm",
-  circle: "rounded-full",
-  parallelogram: "-skew-x-12 rounded-md",
-};
-
-// ─── CUSTOM NODE ─────────────────────────────────────────
+// ─── NODE ─────────────────────────────
 const CustomNode = memo(({ data, selected }) => {
-  const {
-    shape = "rectangle",
-    bg = "#f9fafb",
-    color = "#1a1a1a",
-    border = "#374151",
-    fontSize = 14,
-    bold,
-    italic,
-    label,
-    width = 140,
-    height = 48,
-  } = data;
-
-  const borderColor = selected ? "#6366f1" : border;
-  const base = clsx(
-    "flex items-center justify-center text-center shadow-sm whitespace-pre-wrap break-words select-none",
-    shapeStyles[shape],
-    selected && "ring-2 ring-indigo-400/50"
-  );
-
   return (
     <div
-      className={base}
+      className={clsx(
+        "px-3 py-2 shadow-md text-center",
+        selected && "ring-2 ring-indigo-400"
+      )}
       style={{
-        background: bg,
-        color,
-        border: `2px solid ${borderColor}`,
-        fontSize,
-        fontWeight: bold ? 600 : 400,
-        fontStyle: italic ? "italic" : "normal",
-        width,
-        height,
+        background: data.bg || "#fff",
+        border: `2px solid ${data.border || "#333"}`,
+        borderRadius: data.radius || 8,
+        color: data.color || "#111",
+        fontSize: data.fontSize || 14,
       }}
     >
-      {shape === "diamond" ? (
-        <span className="-rotate-45 block">{label}</span>
-      ) : (
-        label
-      )}
+      {data.label}
     </div>
   );
 });
 
-// ─── CUSTOM EDGE ─────────────────────────────────────────
-const CustomEdge = memo(
-  ({
-    id,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    data,
-    markerEnd,
-    style,
-  }) => {
-    const [path, labelX, labelY] = getBezierPath({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
-      sourcePosition,
-      targetPosition,
-    });
-
-    return (
-      <>
-        <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
-        {data?.label && (
-          <EdgeLabelRenderer>
-            <div
-              className="absolute text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 pointer-events-auto"
-              style={{
-                transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-              }}
-            >
-              {data.label}
-            </div>
-          </EdgeLabelRenderer>
-        )}
-      </>
-    );
-  }
-);
-
 const NODE_TYPES = { custom: CustomNode };
-const EDGE_TYPES = { custom: CustomEdge };
 
-// ─── MAIN FLOW COMPONENT ────────────────────────────────
+// ─── MAIN ─────────────────────────────
 export default function Flow() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState("add");
+const [shape, setShape] = useState("default");
   const [selectedNode, setSelectedNode] = useState(null);
   const [selectedEdge, setSelectedEdge] = useState(null);
-  const [aiPrompt, setAiPrompt] = useState("");
-  const rfWrapper = useRef(null);
-  const [rfi, setRfi] = useState(null);
+const [aiPrompt, setAiPrompt] = useState("");
+const [loading, setLoading] = useState(false);
+  const [label, setLabel] = useState("New Node");
+  const [bg, setBg] = useState("#ffffff");
+  const [color, setColor] = useState("#000000");
 
-  // ── Add + Layout functions ────────────────────────────
-  const autoLayout = useCallback(() => {
-    if (!nodes.length) return;
-    const { nodes: ln, edges: le } = getLayoutedElements(nodes, edges);
-    setNodes(ln);
-    setEdges(le);
-  }, [nodes, edges]);
-
-  const clearFlow = useCallback(() => {
-    if (confirm("Clear everything?")) {
-      setNodes([]);
-      setEdges([]);
-    }
-  }, []);
-
-  const handleGenerate = useCallback(async () => {
-    if (!aiPrompt.trim()) return;
-    try {
-      setLoading(true);
-      const res = await generateFlow({ input: aiPrompt });
-      const flow = res.data;
-      const n = flow.nodes.map((i, idx) => ({
-        id: String(i.id),
-        type: "custom",
-        position: { x: 250, y: idx * 120 },
-        data: { label: i.label },
-      }));
-      const e = flow.edges.map((x) => ({
-        id: `e-${x.source}-${x.target}`,
-        source: String(x.source),
-        target: String(x.target),
-        type: "custom",
-        data: { label: "" },
-      }));
-      const { nodes: ln, edges: le } = getLayoutedElements(n, e);
-      setNodes(ln);
-      setEdges(le);
-    } catch (err) {
-      alert("AI generation failed. Check console.");
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [aiPrompt]);
-
-  // ── Edge Builder ─────────────────────────────────────
-  const buildEdge = useCallback(
-    (src, tgt) => ({
-      id: `e-${src}-${tgt}-${Date.now()}`,
-      source: src,
-      target: tgt,
+  // ─── ADD NODE ─────────────────────
+  const addNode = () => {
+    const newNode = {
+      id: uuid(),
       type: "custom",
-      markerEnd: { type: "arrowclosed", color: "#374151" },
-      style: { stroke: "#374151", strokeWidth: 2 },
-    }),
+      position: { x: Math.random() * 400, y: Math.random() * 400 },
+    data: { label, bg, color, shape },
+    };
+    setNodes((nds) => [...nds, newNode]);
+  };
+
+  const handleGenerate = async () => {
+  if (!aiPrompt.trim()) return;
+
+  try {
+    setLoading(true);
+
+    const res = await generateFlow({ input: aiPrompt });
+
+    const flow = res.data;
+
+    const newNodes = flow.nodes.map((n, i) => ({
+      id: String(n.id),
+      type: "custom",
+      position: { x: 200, y: i * 100 },
+      data: { label: n.label },
+    }));
+
+    const newEdges = flow.edges.map((e) => ({
+      id: `e-${e.source}-${e.target}`,
+      source: String(e.source),
+      target: String(e.target),
+      animated: true,
+    }));
+
+    setNodes(newNodes);
+    setEdges(newEdges);
+  } catch (err) {
+    console.error(err);
+    alert("AI failed");
+  } finally {
+    setLoading(false);
+  }
+};
+  // ─── DELETE ───────────────────────
+  const deleteSelected = () => {
+    if (selectedNode) {
+      setNodes((nds) => nds.filter((n) => n.id !== selectedNode));
+      setEdges((eds) =>
+        eds.filter(
+          (e) => e.source !== selectedNode && e.target !== selectedNode
+        )
+      );
+      setSelectedNode(null);
+    }
+    if (selectedEdge) {
+      setEdges((eds) => eds.filter((e) => e.id !== selectedEdge));
+      setSelectedEdge(null);
+    }
+  };
+
+  // ─── DUPLICATE ────────────────────
+  const duplicateNode = () => {
+    const node = nodes.find((n) => n.id === selectedNode);
+    if (!node) return;
+
+    const newNode = {
+      ...node,
+      id: uuid(),
+      position: {
+        x: node.position.x + 40,
+        y: node.position.y + 40,
+      },
+    };
+
+    setNodes((nds) => [...nds, newNode]);
+  };
+
+  // ─── UPDATE STYLE ─────────────────
+  const updateNodeStyle = () => {
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === selectedNode
+          ? { ...n, data: { ...n.data, label, bg, color } }
+          : n
+      )
+    );
+  };
+
+  // ─── CONNECT ──────────────────────
+  const onConnect = useCallback(
+    (params) =>
+      setEdges((eds) =>
+        addEdge(
+          {
+            ...params,
+            animated: true,
+            style: { stroke: "#333", strokeWidth: 2 },
+          },
+          eds
+        )
+      ),
     []
   );
+const autoLayout = () => {
+  const spacingX = 200;
+  const spacingY = 100;
 
-  const onConnect = useCallback(
-    (params) => setEdges((es) => addEdge(buildEdge(params.source, params.target), es)),
-    [buildEdge]
+  setNodes((nds) =>
+    nds.map((node, index) => ({
+      ...node,
+      position: {
+        x: (index % 3) * spacingX,
+        y: Math.floor(index / 3) * spacingY,
+      },
+    }))
   );
-
-  const onNodeClick = (_, n) => {
-    setSelectedNode(n.id);
-    setSelectedEdge(null);
-  };
-  const onEdgeClick = (_, e) => {
-    setSelectedEdge(e.id);
-    setSelectedNode(null);
-  };
-  const onPaneClick = () => {
-    setSelectedNode(null);
-    setSelectedEdge(null);
-  };
-
-  // ─── RETURN UI ───────────────────────────────────────
+};
   return (
-    <div className="w-full h-screen flex flex-col font-sans bg-slate-50">
-      {/* Top Bar */}
-      <div className="h-12 flex items-center px-4 bg-white border-b border-gray-200">
-        <span className="font-bold text-indigo-900 text-lg">FlowMind 🚀</span>
-        <div className="flex-1" />
-        <button className="btn bg-indigo-500" onClick={autoLayout}>
-          ⬚ Auto-layout
-        </button>
-        <button className="btn bg-red-500 ml-2" onClick={clearFlow}>
-          ✕ Clear
-        </button>
-      </div>
+    <div className="w-full h-screen flex">
+      {/* SIDEBAR */}
+ <div className="w-72 bg-white border-r p-4 flex flex-col gap-5 overflow-y-auto">
+  <h2 className="font-bold text-indigo-600 text-lg">Flow Tools 🚀</h2>
 
-      {/* Body */}
-      <div className="flex flex-1 min-h-0">
-        {/* Sidebar */}
-        <div className="w-60 bg-white border-r border-gray-200 flex flex-col overflow-y-auto">
-          <div className="border-b border-gray-200 flex">
-            {[
-              ["add", "＋ Add"],
-              ["style", "🎨 Style"],
-              ["edge", "⇢ Edge"],
-              ["ai", "⚡ AI"],
-            ].map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setTab(id)}
-                className={clsx(
-                  "flex-1 py-2 font-bold text-xs uppercase tracking-wide border-b-2",
-                  tab === id
-                    ? "text-indigo-500 border-indigo-500"
-                    : "text-gray-400 border-transparent"
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+  {/* ─── ADD NODE ───────────────── */}
+  <div className="border rounded p-3">
+    <h3 className="text-sm font-semibold mb-2">➕ Add Node</h3>
 
-          {/* Add/AI Tabs */}
-          <div className="p-3 flex-1 overflow-y-auto text-xs text-gray-600">
-            {tab === "ai" && (
-              <div className="flex flex-col gap-2">
-                <label className="font-semibold text-gray-700 text-[11px] uppercase">
-                  Describe your flow
-                </label>
-                <textarea
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  rows={6}
-                  placeholder="e.g. user login system with OAuth"
-                  className="w-full border border-gray-300 rounded p-2 text-sm focus:ring focus:ring-green-200"
-                />
-                <button
-                  disabled={loading}
-                  onClick={handleGenerate}
-                  className={clsx(
-                    "rounded py-2 text-white font-semibold transition",
-                    loading
-                      ? "bg-green-400/60 cursor-wait"
-                      : "bg-green-600 hover:bg-green-700"
-                  )}
-                >
-                  {loading ? "Generating…" : "⚡ Generate Flow"}
-                </button>
-              </div>
-            )}
-            {tab === "add" && (
-              <div className="text-gray-500 text-sm">
-                Configure and create new nodes (UI omitted here for brevity).
-              </div>
-            )}
-          </div>
+    <input
+      value={label}
+      onChange={(e) => setLabel(e.target.value)}
+      placeholder="Node text"
+      className="border p-1 w-full mb-2 text-sm"
+    />
 
-          <div className="px-3 py-2 border-t border-gray-200 text-[11px] text-gray-400">
-            {nodes.length} nodes · {edges.length} edges
-          </div>
-        </div>
+    <select
+      onChange={(e) => setShape(e.target.value)}
+      className="border w-full mb-2 text-sm p-1"
+    >
+      <option value="default">Rectangle</option>
+      <option value="circle">Circle</option>
+      <option value="diamond">Decision</option>
+    </select>
 
-        {/* Canvas */}
-        <div ref={rfWrapper} className="flex-1 relative">
-          {loading && (
-            <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-20">
-              <Loader />
-            </div>
-          )}
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={NODE_TYPES}
-            edgeTypes={EDGE_TYPES}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={onNodeClick}
-            onEdgeClick={onEdgeClick}
-            onPaneClick={onPaneClick}
-            onInit={setRfi}
-            fitView
-            fitViewOptions={{ padding: 0.3 }}
-            snapToGrid
-            snapGrid={[10, 10]}
-          >
-            <Background variant="dots" gap={18} size={1} color="#d1d5db" />
-            <Controls />
-            <MiniMap
-              nodeColor={(n) => n.data?.bg || "#f9fafb"}
-              maskColor="rgba(248,250,252,0.7)"
-              className="border border-gray-200 rounded-md"
-            />
-            <Panel position="top-right" className="flex gap-2 m-3">
-              <button
-                className={clsx(
-                  "px-3 py-1 text-xs font-semibold text-white rounded",
-                  selectedNode || selectedEdge
-                    ? "bg-red-500 hover:bg-red-600"
-                    : "bg-gray-200 text-gray-400 cursor-not-allowed"
-                )}
-              >
-                🗑 Delete
-              </button>
-              <button className="px-3 py-1 text-xs font-semibold bg-indigo-500 hover:bg-indigo-600 text-white rounded">
-                ⧉ Dup
-              </button>
-              <button
-                onClick={autoLayout}
-                className="px-3 py-1 text-xs font-semibold bg-green-500 hover:bg-green-600 text-white rounded"
-              >
-                ⬚ Layout
-              </button>
-            </Panel>
-          </ReactFlow>
-        </div>
+    <button
+      onClick={addNode}
+      className="bg-indigo-500 text-white w-full py-1 rounded"
+    >
+      + Add Node
+    </button>
+  </div>
+
+  {/* ─── EDIT NODE ───────────────── */}
+  <div className="border rounded p-3">
+    <h3 className="text-sm font-semibold mb-2">🎨 Edit Node</h3>
+
+    <input
+      value={label}
+      onChange={(e) => setLabel(e.target.value)}
+      placeholder="Edit label"
+      className="border p-1 w-full mb-2 text-sm"
+    />
+
+    <div className="flex gap-2 mb-2">
+      <input type="color" value={bg} onChange={(e) => setBg(e.target.value)} />
+      <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+    </div>
+
+    <button
+      onClick={updateNodeStyle}
+      className="bg-green-500 text-white w-full py-1 rounded"
+    >
+      Apply Changes
+    </button>
+  </div>
+
+  {/* ─── EDGE TOOLS ───────────────── */}
+  <div className="border rounded p-3">
+    <h3 className="text-sm font-semibold mb-2">🔗 Edge Tools</h3>
+
+    <p className="text-xs text-gray-500 mb-2">
+      Connect nodes by dragging handles
+    </p>
+
+    <button
+      onClick={() =>
+        setEdges((eds) =>
+          eds.map((e) => ({ ...e, animated: !e.animated }))
+        )
+      }
+      className="bg-blue-500 text-white w-full py-1 rounded mb-2"
+    >
+      Toggle Animation
+    </button>
+
+    <button
+      onClick={() => setEdges([])}
+      className="bg-gray-400 text-white w-full py-1 rounded"
+    >
+      Clear Edges
+    </button>
+  </div>
+
+  {/* ─── AI GENERATE ───────────────── */}
+  <div className="border rounded p-3">
+    <h3 className="text-sm font-semibold mb-2">⚡ AI Generator</h3>
+
+    <textarea
+      value={aiPrompt}
+      onChange={(e) => setAiPrompt(e.target.value)}
+      placeholder="e.g. e-commerce checkout flow"
+      className="border w-full p-2 text-sm mb-2"
+    />
+
+    <button
+      onClick={handleGenerate}
+      disabled={loading}
+      className="bg-green-600 text-white w-full py-1 rounded"
+    >
+      {loading ? "Generating..." : "Generate Flow"}
+    </button>
+  </div>
+
+  {/* ─── ACTIONS ───────────────── */}
+  <div className="border rounded p-3">
+    <h3 className="text-sm font-semibold mb-2">⚙️ Actions</h3>
+
+    <button
+      onClick={deleteSelected}
+      className="bg-red-500 text-white w-full py-1 rounded mb-2"
+    >
+      🗑 Delete
+    </button>
+
+    <button
+      onClick={duplicateNode}
+      className="bg-yellow-500 text-white w-full py-1 rounded mb-2"
+    >
+      📄 Duplicate
+    </button>
+
+    <button
+      onClick={() => {
+        setNodes([]);
+        setEdges([]);
+      }}
+      className="bg-gray-500 text-white w-full py-1 rounded"
+    >
+      Clear All
+    </button>
+  </div>
+
+  {/* ─── LAYOUT TOOLS ───────────────── */}
+  <div className="border rounded p-3">
+    <h3 className="text-sm font-semibold mb-2">📐 Layout</h3>
+
+    <button
+onClick={autoLayout}
+      className="bg-indigo-500 text-white w-full py-1 rounded"
+    >
+      Auto Arrange
+    </button>
+  </div>
+</div>
+
+      {/* CANVAS */}
+      <div className="flex-1">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={NODE_TYPES}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onNodeClick={(_, n) => setSelectedNode(n.id)}
+          onEdgeClick={(_, e) => setSelectedEdge(e.id)}
+          fitView
+        >
+          <Background />
+          <Controls />
+          <MiniMap />
+          <Panel position="top-right">
+            <span className="text-xs bg-white p-1 rounded shadow">
+              {nodes.length} Nodes | {edges.length} Edges
+            </span>
+          </Panel>
+        </ReactFlow>
       </div>
     </div>
   );
 }
-
-/* Tailwind Button shortcut */
-export const Button = ({ children, onClick, color = "indigo" }) => (
-  <button
-    onClick={onClick}
-    className={`px-3 py-1 text-xs font-semibold text-white bg-${color}-500 hover:bg-${color}-600 rounded`}
-  >
-    {children}
-  </button>
-);
